@@ -10,10 +10,10 @@ import * as api from '../services/api';
 
 interface ChatContextType {
   messages: ChatMessage[];
-  sessionId: string | null;
   isLoading: boolean;
   error: string | null;
   currentVocabulary: VocabularyItem[];
+  sessionId: string | null;
   sendMessage: (content: string) => Promise<void>;
   clearChat: () => void;
   setError: (error: string | null) => void;
@@ -23,96 +23,90 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentVocabulary, setCurrentVocabulary] = useState<VocabularyItem[]>(
-    []
-  );
+  const [currentVocabulary, setCurrentVocabulary] = useState<VocabularyItem[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!content.trim()) return;
+  const sendMessage = useCallback(async (content: string) => {
+    if (!content.trim()) return;
 
-      // Add user message immediately
-      const userMessage: ChatMessage = {
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: content.trim(),
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMessage]);
-      setIsLoading(true);
-      setError(null);
+    // Add user message
+    const userMessage: ChatMessage = {
+      id: 'user-' + Date.now(),
+      role: 'user',
+      content: content.trim(),
+      timestamp: new Date().toISOString(),
+    };
 
-      try {
-        const response = await api.sendMessage({
-          message: content.trim(),
-          session_id: sessionId || undefined,
-          language: 'hiligaynon',
-        });
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+    setError(null);
 
-        // Update session ID if new
-        if (!sessionId && response.session_id) {
-          setSessionId(response.session_id);
-        }
+    try {
+      const response = await api.sendMessage({
+        message: content.trim(),
+        user_id: 'demo-user',
+        session_id: sessionId || undefined,
+        language: 'hiligaynon',
+      });
 
-        // Add assistant message
-        const assistantMessage: ChatMessage = {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: response.message,
-          timestamp: new Date().toISOString(),
-          metadata: {
-            agent_type: response.agent_type,
-            confidence: response.confidence,
-            vocabulary: response.vocabulary,
-            grammar_notes: response.grammar_notes,
-            audio_url: response.audio_url,
-          },
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-
-        // Update vocabulary sidebar
-        if (response.vocabulary && response.vocabulary.length > 0) {
-          setCurrentVocabulary((prev) => {
-            const newVocab = response.vocabulary!.filter(
-              (v) => !prev.some((p) => p.word === v.word)
-            );
-            return [...newVocab, ...prev].slice(0, 20);
-          });
-        }
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : 'Failed to send message';
-        setError(errorMessage);
-        // Remove the user message if failed
-        setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
-      } finally {
-        setIsLoading(false);
+      // Update session ID if this is a new session
+      if (response.session_id && !sessionId) {
+        setSessionId(response.session_id);
       }
-    },
-    [sessionId]
-  );
+
+      // Add assistant message
+      const assistantMessage: ChatMessage = {
+        id: 'assistant-' + Date.now(),
+        role: 'assistant',
+        content: response.message,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          agent_type: response.agent_type,
+          confidence: response.confidence,
+          vocabulary: response.vocabulary,
+          grammar_notes: response.grammar_notes,
+          audio_url: response.audio_url,
+        },
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      // Update vocabulary if provided
+      if (response.vocabulary && response.vocabulary.length > 0) {
+        setCurrentVocabulary((prev) => {
+          const existingWords = new Set(prev.map((v) => v.word));
+          const newVocab = response.vocabulary!.filter(
+            (v) => !existingWords.has(v.word)
+          );
+          return [...prev, ...newVocab];
+        });
+      }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : 'Failed to send message';
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionId]);
 
   const clearChat = useCallback(() => {
-    if (sessionId) {
-      api.endSession(sessionId).catch(console.error);
-    }
     setMessages([]);
-    setSessionId(null);
     setCurrentVocabulary([]);
+    setSessionId(null);
     setError(null);
-  }, [sessionId]);
+  }, []);
 
   return (
     <ChatContext.Provider
       value={{
         messages,
-        sessionId,
         isLoading,
         error,
         currentVocabulary,
+        sessionId,
         sendMessage,
         clearChat,
         setError,
